@@ -87,15 +87,15 @@ policy template dependencies. When a policy is created with a dependency, we
 can start to watch the policy object that it is dependent on. If the compliance
 of the dependency matches up with what the policy wants, we will process it
 normally in the template sync. If the dependencies are not met, we will assign a
-`Pending` state to the policy compliance, and the watcher library will notify us 
-when the dependency changes, so we can re-evaluate the decision. However, if some
-templates in the policy have their dependencies satisfied and evaluate to
-NonCompliant, we will display the NonCompliant status in the policy status instead
-of Pending, since users will need to be able to see any violations at a glance.
-If some templates have evaluated to Compliant while others are still Pending, we
-will display Pending in the policy status, so we do not report Compliant unless
-all templates have been processed. This logic will be added into the new combined
-governance-policy-framework-addon repository.
+`Pending` state to that policy template's compliance, and use the watcher library 
+to be notified when the dependency changes, so we can re-evaluate the decision. 
+
+We will add additional logic to calculate a policy's overall compliance. A policy
+will be `NonCompliant` if *any* of its templates are `NonCompliant`, the same way
+it works now. If a template in the policy is `Pending`, and the `ignorePending`
+flag on the template is false or not set, then the overall policy state will be
+`Pending` (unless any templates are `NonCompliant`). A Policy will only be marked
+as `Compliant` if *all* its non-ignored templates are `Compliant`.
 
 These dependencies will be able to accept any object that has a
 `status.complianceState` field - policies, policy sets and, all other policy
@@ -103,6 +103,12 @@ types. If an object in `dependencies` or `extraDependencies` does not contain
 that status field, the policy will remain in a pending state until the status
 field appears with the correct value, but we will notify the user that
 `status.complianceState` is missing in the policy status message.
+
+Since PolicySets should be allowed as dependencies, but those resources only
+exist on the hub, we propose that the propagator should replace the PolicySet
+dependency with all the individual policies that are in that set. So the root
+policy would declare a PolicySet, but in the replicated policies only the Policies
+in that set would be seen.
 
 We plan on writing info about templates that fail the dependency check, such
 as what objects the template is waiting on, to the policy status in addition
@@ -198,15 +204,13 @@ on the cluster as a result of that dependency will be deleted.
 
 ### Open Questions
 
-Is setting an `apiGroup` field in `dependencies/extraDependencies` necessary? Currently we should
-not have any issues with conficting `kind` for policy templates, but in theory users could create
-a custom policy controller for a kind that has a name conflict with one of the build-in policy
-templates. This isn't likely to happen, but if we think the `apiGroup` might be necessary in the
-future, it's probably better to add it now rather than later.
-- Update: Since we plan on supporting policySet, which is `v1beta1`, as well as new policy types
-in the future, we will add a field to specify the group and version of the kubernetes resource in
-each dependency. This field will be called `apiVersion` to match the similar field that is set in
-Kubernetes manifests.
+The `namespace` field in dependencies might not be necessary. On a managed cluster,
+Policy template types are currently all inside the cluster namespace, so setting
+a namespace on those dependencies doesn't make sense. On Policies, namespaces only
+make sense on the hub cluster - the policy name is prepended with its namespace
+when it is replicated to clusters. So the field could be helpful there, but we
+could just require policy authors to use the replicated name that includes the
+namespace.
 
 ### Test Plan
 
